@@ -1,7 +1,7 @@
 ---
 description: "Start Ralph planning phase with in-depth interview to create specs and implementation plan"
 argument-hint: "[task-description]"
-allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-ralph-plan.sh *)", "Read", "Write", "Glob", "Grep", "AskUserQuestion"]
+allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-ralph-plan.sh *)", "Read", "Write", "Glob", "Grep", "AskUserQuestion", "EnterPlanMode"]
 ---
 
 # Ralph Planning Phase
@@ -99,6 +99,40 @@ Planning Complete!
 [x] .ralph/specs/*.md          - N feature specs
 [x] IMPLEMENTATION_PLAN.md     - stdlib as Phase 1, features after
 [x] PROMPT.md                  - Configured
+```
 
-Ready: /ralph-build
+## Step 5: Implementation Path
+
+Ask the user how they want to proceed using AskUserQuestion:
+
+```
+Question: How would you like to proceed with implementation?
+
+Options:
+1. "Enter Plan Mode" - Refine the plan with codebase-specific details (file paths, existing patterns, architectural considerations). Claude will analyze the codebase and improve the implementation plan before coding begins.
+
+2. "Run /ralph-build" - Proceed directly to autonomous implementation. Ralph will follow the specs and IMPLEMENTATION_PLAN.md as-is.
+
+3. "Exit and review" - End planning here. Review the generated specs manually and run /ralph-build later.
+```
+
+**If user chooses "Enter Plan Mode":**
+1. Use the EnterPlanMode tool to transition into plan mode
+2. In plan mode, Claude will:
+   - Read `.ralph/IMPLEMENTATION_PLAN.md` as the starting context
+   - Analyze the actual codebase for existing patterns and file structure
+   - Refine the plan with specific file paths, imports, and integration points
+   - Present the improved plan for user approval
+3. After approval, implementation can begin (either via /ralph-build or direct coding)
+
+**If user chooses "Run /ralph-build":**
+Display: `Ready: /ralph-build`
+
+**If user chooses "Exit and review":**
+Display:
+```
+Planning artifacts saved to .ralph/
+- Review specs in .ralph/specs/
+- Review implementation plan in .ralph/IMPLEMENTATION_PLAN.md
+- When ready, run: /ralph-build
 ```
