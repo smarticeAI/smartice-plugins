@@ -1,6 +1,6 @@
 ---
 name: nodejs-best-practices
-version: 1.0.1
+version: 1.0.2
 description: "Domain-specific best practices for Node.js development covering async patterns, error handling, streams, testing with node:test, graceful shutdown, performance profiling, modules (ESM/CJS), caching, logging, and TypeScript integration via type stripping. Use when building, debugging, or optimizing Node.js applications — including async/await pitfalls, unhandled rejections, stream backpressure, flaky test diagnosis, CPU profiling, environment configuration, or running TypeScript natively with Node 22+. Trigger terms: Node.js, async patterns, streams, node:test, graceful shutdown, type stripping, profiling, event loop, unhandled rejection, backpressure."
 ---
 
@@ -198,6 +198,18 @@ Key build options:
 ```
 
 **When NOT to use type stripping:** If you need enums, decorators with `emitDecoratorMetadata`, or JSX — use a standard `tsc` build pipeline instead.
+
+### Development workflow
+
+Run type checking separately since type stripping doesn't validate types:
+
+```bash
+# Check types without emitting
+tsc --noEmit
+
+# Watch mode for development
+tsc --noEmit --watch
+```
 
 ---
 
@@ -804,6 +816,19 @@ describe('Database tests', () => {
 });
 ```
 
+### Test directory structure
+
+Structure tests alongside source files:
+
+```
+src/
+  user/
+    user.service.ts
+    user.service.test.ts
+    user.repository.ts
+    user.repository.test.ts
+```
+
 ### Snapshot testing
 
 ```typescript
@@ -899,6 +924,32 @@ node --test --test-concurrency=10
 for i in {1..50}; do node --test src/flaky.test.ts || echo "Failed on run $i"; done
 ```
 
+### Diagnostic logging in test hooks
+
+```typescript
+import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
+
+describe('MyTests', () => {
+  before(() => console.log('[BEFORE] MyTests starting'));
+  after(() => console.log('[AFTER] MyTests complete'));
+  beforeEach((t) => console.log(`[BEFORE EACH] Starting: ${t.name}`));
+  afterEach((t) => console.log(`[AFTER EACH] Finished: ${t.name}`));
+
+  it('test 1', () => { /* ... */ });
+  it('test 2', () => { /* ... */ });
+});
+```
+
+### Check for hanging async operations
+
+```bash
+# Use --inspect to debug hanging tests
+node --inspect --test src/hanging.test.ts
+
+# Then connect Chrome DevTools to chrome://inspect
+# Check the "Async" call stack to see what's pending
+```
+
 ### Common causes
 
 **Timing and race conditions** — wait for actual conditions, not arbitrary timeouts:
@@ -988,6 +1039,49 @@ it('should send notification', async (t) => {
 });
 ```
 
+**Test order dependencies** — tests pass with `--test` but fail with `--test --parallel`:
+
+```typescript
+// BAD - Test 2 depends on side effect from Test 1
+it('test 1: create user', async (t) => {
+  await db.insert({ id: 1, name: 'John' });
+  t.assert.ok(true);
+});
+
+it('test 2: find user', async (t) => {
+  const user = await db.findById(1); // Fails if test 1 didn't run first
+  t.assert.equal(user.name, 'John');
+});
+
+// GOOD - Each test sets up its own data
+it('test 2: find user', async (t) => {
+  await db.insert({ id: 1, name: 'John' }); // Setup within test
+  const user = await db.findById(1);
+  t.assert.equal(user.name, 'John');
+});
+```
+
+**Resource cleanup failures** — tests fail with "too many open files" or connections exhausted:
+
+```typescript
+// BAD - Resources not cleaned up
+it('should read file', async (t) => {
+  const handle = await fs.open('test.txt');
+  const content = await handle.read();
+  t.assert.ok(content);
+  // handle never closed!
+});
+
+// GOOD - Always clean up resources
+it('should read file', async (t) => {
+  const handle = await fs.open('test.txt');
+  t.after(() => handle.close()); // Cleanup registered
+
+  const content = await handle.read();
+  t.assert.ok(content);
+});
+```
+
 ### Finding open handles
 
 ```typescript
@@ -1003,6 +1097,97 @@ describe('Debug hanging tests', () => {
   it('might hang', async () => {
     // Your test
   });
+});
+```
+
+### Debugging strategies
+
+**Use test retry to identify flaky tests:**
+
+```typescript
+// Temporarily add retry to identify flaky test
+it('potentially flaky test', { retry: 3 }, async (t) => {
+  // If this needs retries to pass, it's flaky
+});
+```
+
+**Async leak detection:**
+
+```typescript
+import { describe, it, after } from 'node:test';
+
+describe('async leak detection', () => {
+  const activeHandles = new Set();
+
+  after(() => {
+    if (activeHandles.size > 0) {
+      console.error('Leaked handles:', [...activeHandles]);
+    }
+  });
+
+  it('should not leak', async (t) => {
+    const timer = setTimeout(() => {}, 10000);
+    activeHandles.add(timer);
+
+    // Do test work...
+
+    clearTimeout(timer);
+    activeHandles.delete(timer);
+  });
+});
+```
+
+**Use explicit waits instead of timeouts:**
+
+```typescript
+// BAD - Arbitrary timeout
+await new Promise(r => setTimeout(r, 1000));
+
+// GOOD - Wait for specific condition
+await waitFor(() => element.isVisible());
+
+// Helper function
+async function waitFor(condition, timeout = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    if (await condition()) return;
+    await new Promise(r => setTimeout(r, 50));
+  }
+  throw new Error('Condition not met within timeout');
+}
+```
+
+**Ensure test isolation with transactions:**
+
+```typescript
+describe('database tests', () => {
+  beforeEach(async () => {
+    await db.query('BEGIN');
+  });
+
+  afterEach(async () => {
+    await db.query('ROLLBACK');
+  });
+
+  it('should insert record', async (t) => {
+    await db.insert({ name: 'test' });
+    const records = await db.findAll();
+    t.assert.equal(records.length, 1);
+  });
+});
+```
+
+### CI-specific flakiness
+
+**Network reliability** — mock external APIs in tests to avoid network-related flakiness:
+
+```typescript
+// Always mock external HTTP calls in unit tests
+t.mock.method(globalThis, 'fetch', async (url) => {
+  if (url.includes('api.external.com')) {
+    return { ok: true, json: async () => mockData };
+  }
+  throw new Error(`Unmocked URL: ${url}`);
 });
 ```
 
@@ -1241,6 +1426,52 @@ const result = await autocannon({
 console.log(autocannon.printResult(result));
 ```
 
+### Load testing with wrk
+
+[wrk](https://github.com/wg/wrk) is a high-performance HTTP benchmarking tool:
+
+```bash
+# Basic benchmark
+wrk -t12 -c400 -d30s http://localhost:3000
+
+# With Lua script for custom requests
+wrk -t12 -c400 -d30s -s post.lua http://localhost:3000
+```
+
+Options:
+- `-t` - Number of threads
+- `-c` - Number of connections
+- `-d` - Duration
+- `-s` - Lua script for custom logic
+
+### Load testing with k6
+
+[k6](https://k6.io/) is ideal for complex load testing scenarios:
+
+```javascript
+// load-test.js
+import http from 'k6/http';
+import { check, sleep } from 'k6';
+
+export const options = {
+  vus: 100,
+  duration: '30s',
+};
+
+export default function () {
+  const res = http.get('http://localhost:3000');
+  check(res, {
+    'status is 200': (r) => r.status === 200,
+    'response time < 200ms': (r) => r.timings.duration < 200,
+  });
+  sleep(1);
+}
+```
+
+```bash
+k6 run load-test.js
+```
+
 ### Profiling workflow
 
 1. **Establish baseline** — Run autocannon to get initial metrics
@@ -1248,6 +1479,15 @@ console.log(autocannon.printResult(result));
 3. **Optimize** — Fix the identified bottlenecks
 4. **Verify** — Run autocannon again to measure improvement
 5. **Repeat** — Continue until performance goals are met
+
+### Tool Comparison
+
+| Tool | Best For |
+|------|----------|
+| @platformatic/flame | CPU profiling, flame graphs, AI-assisted analysis |
+| autocannon | Quick HTTP benchmarks, Node.js native |
+| wrk | Maximum throughput testing |
+| k6 | Complex scenarios, CI/CD integration, scripted tests |
 
 ### Built-in Node.js profiling
 
@@ -1353,6 +1593,20 @@ import config from './config.json' with { type: 'json' };
 
 // BAD - missing extension (works in bundlers but not native ESM)
 import { helper } from './helper';
+```
+
+### Barrel exports
+
+Use index files to simplify imports:
+
+```typescript
+// src/utils/index.ts
+export { formatDate, parseDate } from './date.js';
+export { formatCurrency } from './currency.js';
+export { validateEmail } from './validation.js';
+
+// Consumer
+import { formatDate, formatCurrency } from './utils/index.js';
 ```
 
 ### __dirname and __filename in ESM
@@ -1472,6 +1726,13 @@ const logger = pino({
 });
 ```
 
+### Available transports
+
+- [pino-pretty](https://github.com/pinojs/pino-pretty) - Human-readable formatting
+- [pino-elasticsearch](https://github.com/pinojs/pino-elasticsearch) - Send to Elasticsearch
+- [pino-loki](https://github.com/Julien-R44/pino-loki) - Send to Grafana Loki
+- [pino-datadog](https://github.com/ovhemert/pino-datadog) - Send to Datadog
+
 ### Child loggers
 
 Create child loggers with bound context:
@@ -1589,6 +1850,37 @@ type Env = Static<typeof schema>;
 export const env = envSchema<Env>({ schema });
 ```
 
+### Validation with Zod
+
+Alternatively, use [Zod](https://github.com/colinhacks/zod) for validation:
+
+```typescript
+import { z } from 'zod';
+
+const EnvSchema = z.object({
+  PORT: z.coerce.number().default(3000),
+  DATABASE_URL: z.string().url(),
+  API_KEY: z.string().min(1),
+  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+});
+
+type Env = z.infer<typeof EnvSchema>;
+
+function loadEnv(): Env {
+  const result = EnvSchema.safeParse(process.env);
+
+  if (!result.success) {
+    console.error('Invalid environment variables:');
+    console.error(result.error.format());
+    process.exit(1);
+  }
+
+  return result.data;
+}
+
+export const env = loadEnv();
+```
+
 ### Avoid NODE_ENV
 
 `NODE_ENV` is an antipattern. It conflates multiple concerns (environment detection, behavior toggling, optimization flags, security settings) into a single variable.
@@ -1634,6 +1926,103 @@ API_KEY=sk-dev-key-123
 DATABASE_URL=postgresql://test:test@localhost:5432/myapp_test
 ```
 
+### Configuration Object Pattern
+
+Create a typed configuration object:
+
+```typescript
+interface Config {
+  server: {
+    port: number;
+    host: string;
+  };
+  database: {
+    url: string;
+    poolSize: number;
+  };
+  auth: {
+    jwtSecret: string;
+    jwtExpiresIn: string;
+  };
+  features: {
+    enableMetrics: boolean;
+    enableTracing: boolean;
+  };
+}
+
+function createConfig(): Config {
+  return {
+    server: {
+      port: parseInt(process.env.PORT || '3000', 10),
+      host: process.env.HOST || '0.0.0.0',
+    },
+    database: {
+      url: requireEnv('DATABASE_URL'),
+      poolSize: parseInt(process.env.DB_POOL_SIZE || '10', 10),
+    },
+    auth: {
+      jwtSecret: requireEnv('JWT_SECRET'),
+      jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1h',
+    },
+    features: {
+      enableMetrics: process.env.ENABLE_METRICS === 'true',
+      enableTracing: process.env.ENABLE_TRACING === 'true',
+    },
+  };
+}
+
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
+
+export const config = createConfig();
+```
+
+### Secrets in Production
+
+Never commit secrets to version control. Use a secrets management service appropriate for your infrastructure:
+
+**Cloud Provider Services:**
+- [AWS Secrets Manager](https://aws.amazon.com/secrets-manager/)
+- [Google Cloud Secret Manager](https://cloud.google.com/secret-manager)
+- [Azure Key Vault](https://azure.microsoft.com/en-us/products/key-vault)
+
+**Infrastructure Tools:**
+- [HashiCorp Vault](https://www.vaultproject.io/)
+- [Doppler](https://www.doppler.com/)
+- [Infisical](https://infisical.com/)
+
+**Container Orchestration:**
+- Kubernetes Secrets
+- Docker Swarm Secrets
+
+**CI/CD Platforms:**
+- GitHub Actions Secrets
+- GitLab CI/CD Variables
+- CircleCI Contexts
+
+These services inject secrets as environment variables at runtime, keeping them out of your codebase and version history.
+
+### Feature Flags
+
+Implement feature flags via environment:
+
+```typescript
+const features = {
+  newDashboard: process.env.FEATURE_NEW_DASHBOARD === 'true',
+  betaApi: process.env.FEATURE_BETA_API === 'true',
+  darkMode: process.env.FEATURE_DARK_MODE === 'true',
+};
+
+export function isFeatureEnabled(feature: keyof typeof features): boolean {
+  return features[feature] ?? false;
+}
+```
+
 ### Rules
 
 - Validate ALL required env vars at startup — fail fast
@@ -1650,6 +2039,25 @@ DATABASE_URL=postgresql://test:test@localhost:5432/myapp_test
 - Use **`lru-cache`** for process-local, bounded in-memory reuse where deduplicating concurrent requests is not the main concern.
 - Use **`async-cache-dedupe`** when multiple concurrent calls can request the same key and you want one in-flight request per key.
 - In stream/ETL scenarios, prefer `async-cache-dedupe` for enrichment calls inside an `async function*` transform.
+
+### Memoization with mnemoist
+
+Use [mnemoist](https://github.com/Yomguithereal/mnemonist) for synchronous memoization:
+
+```typescript
+import { LRUCache } from 'mnemonist';
+
+const cache = new LRUCache<string, User>(1000);
+
+function getUser(id: string): User | undefined {
+  if (cache.has(id)) {
+    return cache.get(id);
+  }
+  const user = fetchUserSync(id);
+  cache.set(id, user);
+  return user;
+}
+```
 
 ### async-cache-dedupe
 
@@ -1802,4 +2210,186 @@ function subscribe(emitter: EventEmitter): () => void {
   emitter.on('event', handler);
   return () => emitter.off('event', handler);
 }
+```
+
+### When to Cache
+
+- Database query results
+- External API responses
+- Computed values that are expensive to calculate
+- Configuration that rarely changes
+
+### When NOT to Cache
+
+- User-specific sensitive data (without proper isolation)
+- Rapidly changing data
+- Data that must always be consistent
+- Large objects that would exhaust memory
+
+---
+
+## Exploring node_modules
+
+### When to Explore node_modules
+
+Explore node_modules when you need to:
+- Find specific packages and their versions
+- Analyze dependencies and dependency trees
+- Examine package contents
+- Investigate dependency conflicts
+- Understand how a package works internally
+
+### Core Techniques
+
+#### Finding Package Versions
+
+```bash
+# Check actual installed version
+cat node_modules/fastify/package.json | grep '"version"'
+
+# For scoped packages
+cat node_modules/@fastify/cors/package.json | grep '"version"'
+
+# List all versions with npm
+npm ls fastify
+```
+
+#### Navigating Directory Structure
+
+```bash
+# List package contents
+ls node_modules/fastify/
+
+# Find TypeScript definitions
+ls node_modules/fastify/*.d.ts
+ls node_modules/@types/node/
+
+# Check main entry point
+cat node_modules/fastify/package.json | grep '"main"\|"exports"'
+```
+
+#### Understanding Package Manager Differences
+
+**npm/yarn (node_modules hoisting):**
+```
+node_modules/
+  fastify/
+  pino/          # hoisted from fastify's dependencies
+  @fastify/cors/
+```
+
+**pnpm (content-addressable storage):**
+```
+node_modules/
+  .pnpm/
+    fastify@4.0.0/
+      node_modules/
+        fastify/
+        pino/    # symlinked, not hoisted
+  fastify -> .pnpm/fastify@4.0.0/node_modules/fastify
+```
+
+### Finding Package READMEs
+
+**CRITICAL: Never use `find`, `grep`, or `rg` for locating READMEs. Follow this sequence:**
+
+1. **Direct Read attempts (try in order):**
+   ```
+   node_modules/[package-name]/README.md
+   node_modules/[package-name]/readme.md
+   node_modules/[package-name]/README
+   ```
+   For scoped packages: `node_modules/@scope/package-name/README.md`
+
+2. **If not found, list directory contents:**
+   ```bash
+   ls node_modules/[package-name]/
+   ```
+   Look for README files in output, then read the exact filename.
+
+3. **Alternative locations:**
+   ```
+   node_modules/[package-name]/docs/README.md
+   ```
+   Or check `readme` field in `package.json`.
+
+### Analyzing Dependency Trees
+
+```bash
+# See why a package is installed
+npm why lodash
+
+# Full dependency tree
+npm ls --all
+
+# Only production dependencies
+npm ls --prod
+
+# Find duplicates
+npm ls --all 2>&1 | grep -E "^\s+.*@[0-9]" | sort | uniq -d
+```
+
+### Investigating Conflicts
+
+#### Peer Dependency Issues
+
+```bash
+# Check peer dependencies
+cat node_modules/some-plugin/package.json | grep -A 10 '"peerDependencies"'
+
+# See what's actually installed vs. what's expected
+npm ls react
+```
+
+#### Duplicate Packages
+
+When the same package appears multiple times:
+
+```bash
+# Find all instances of a package
+find node_modules -name "package.json" -path "*/lodash/*" 2>/dev/null
+
+# Check for version mismatches
+npm ls lodash
+```
+
+### Examining Package Internals
+
+#### Entry Points
+
+```bash
+# Check exports field (modern)
+node -e "console.log(JSON.stringify(require('./node_modules/fastify/package.json').exports, null, 2))"
+
+# Check main field (legacy)
+cat node_modules/fastify/package.json | grep '"main"'
+```
+
+#### TypeScript Definitions
+
+```bash
+# Find type definitions
+ls node_modules/fastify/*.d.ts
+cat node_modules/fastify/package.json | grep '"types"\|"typings"'
+
+# For DefinitelyTyped packages
+ls node_modules/@types/
+```
+
+#### Source Files
+
+```bash
+# Examine source structure
+ls node_modules/fastify/lib/
+head -50 node_modules/fastify/lib/server.js
+```
+
+### Debugging Module Resolution
+
+```bash
+# See how Node.js resolves a module
+node -e "console.log(require.resolve('fastify'))"
+
+# With full resolution paths
+node --print "require.resolve.paths('fastify')"
 ```
