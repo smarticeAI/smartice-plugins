@@ -1,0 +1,8 @@
+{
+  "name": "dev-skills",
+  "version": "1.0.0",
+  "description": "Custom Node.js and TypeScript development skills — best practices, patterns, and strict typing guidance",
+  "author": {
+    "name": "HengWoo"
+  }
+}
