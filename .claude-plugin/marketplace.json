@@ -80,11 +80,7 @@
     },
     {
       "name": "agent-browse",
-      "source": {
-        "source": "url",
-        "url": "https://github.com/HengWoo/agent_browse.git",
-        "subdir": "plugin"
-      },
+      "source": "./plugins/agent-browse",
       "description": "Real Chrome browser automation via MCP relay. Anti-bot bypass, login session reuse, real fingerprints. Multi-user with per-user auth tokens.",
       "version": "2.0.0",
       "category": "automation",

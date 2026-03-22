@@ -1,0 +1,21 @@
+{
+  "name": "agent-browse",
+  "version": "2.0.0",
+  "description": "Control your real Chrome browser remotely via relay server. Uses Chrome extension bridge for anti-bot bypass, login session reuse, and real fingerprints. Multi-user with per-user auth tokens.",
+  "author": {
+    "name": "HengWoo",
+    "email": "heng.woo@gmail.com"
+  },
+  "repository": "https://github.com/HengWoo/agent_browse",
+  "license": "MIT",
+  "keywords": [
+    "browser",
+    "automation",
+    "chrome",
+    "anti-bot",
+    "cdp",
+    "relay",
+    "mcp",
+    "remote"
+  ]
+}
