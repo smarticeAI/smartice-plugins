@@ -22,10 +22,41 @@ Add this marketplace to Claude Code:
 
 | Plugin | Description | Author |
 |--------|-------------|--------|
+| **agent-browse** | Real Chrome browser automation via relay server | HengWoo |
 | **design-council** | Multi-model frontend design with Opus + Gemini | HengWoo |
 | **design-council-lite** | Lightweight design workflow | HengWoo |
 | **db-tools** | Database design review & validation | 杨睿祺 |
 | **smartice-tools** | Marketplace contribution tools | HengWoo |
+
+---
+
+### agent-browse
+
+Real Chrome browser automation for Claude Code. Uses a Chrome extension relay for anti-bot bypass, login session reuse, and real browser fingerprints.
+
+通过 Claude Code 远程控制真实 Chrome 浏览器。使用 Chrome 扩展中继，绕过反爬虫检测，复用登录会话，保持真实浏览器指纹。
+
+**How it works | 工作原理：**
+```
+Claude Code → MCP (HTTPS) → Relay Server → WebSocket → Chrome Extension → Your Browser
+```
+
+**Setup | 设置：**
+
+1. Install the plugin | 安装插件：
+   ```
+   /install-plugin smarticeAI/smartice_plugins agent-browse
+   ```
+2. Claude Code will prompt you for your auth token on first enable — it is stored securely in your system keychain, no environment variables needed. Token is provided by your admin. | 首次启用时 Claude Code 会提示输入认证令牌，令牌安全存储在系统钥匙串中，无需设置环境变量。令牌由管理员提供。
+3. Install the [Chrome Extension](https://github.com/HengWoo/agent_browse/releases/download/v0.2.0/agent-browse-extension.zip), open Options, set server URL (`wss://browse.clembot.uk`), user ID, and token, then click Save & Reconnect. | 安装 [Chrome 扩展](https://github.com/HengWoo/agent_browse/releases/download/v0.2.0/agent-browse-extension.zip)，打开选项页，设置服务器地址 (`wss://browse.clembot.uk`)、用户 ID 和令牌，点击保存并重连。
+
+**Features | 功能：**
+- 23 MCP tools: tabs, navigation, clicks, screenshots, network capture, cookies, and more | 23 个 MCP 工具：标签页、导航、点击、截图、网络抓取、Cookie 等
+- Uses your real Chrome with logged-in sessions | 使用真实 Chrome 和已登录会话
+- Anti-bot bypass — sites see a real browser, not automation | 反爬虫绕过 — 网站看到的是真实浏览器
+- Multi-user with per-user auth tokens | 多用户，每用户独立令牌
+
+**Source | 源码：** [HengWoo/agent_browse](https://github.com/HengWoo/agent_browse)
 
 ---
 
@@ -178,6 +209,12 @@ your-plugin/
 ---
 
 ## Requirements | 环境要求
+
+### Browser Plugin (agent-browse)
+
+Requires Chrome with the relay extension installed and an auth token (prompted on first plugin enable).
+
+需要安装了中继扩展的 Chrome 浏览器和认证令牌（首次启用插件时会提示输入）。
 
 ### Design Plugins (design-council, design-council-lite)
 
